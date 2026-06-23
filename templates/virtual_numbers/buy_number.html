@@ -1,0 +1,56 @@
+{% extends 'layouts/base.html' %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body p-4">
+                <h4 class="fw-bold mb-4">
+                    <i class="fas fa-shopping-cart me-2 text-primary"></i> Confirm Purchase
+                </h4>
+
+                <table class="table table-borderless">
+                    <tr>
+                        <th class="text-muted">Service</th>
+                        <td class="fw-bold">{{ service|title }}</td>
+                    </tr>
+                    <tr>
+                        <th class="text-muted">Country</th>
+                        <td class="fw-bold">{{ country|title }}</td>
+                    </tr>
+                    <tr>
+                        <th class="text-muted">Price</th>
+                        <td class="fw-bold text-primary">₦{{ price_ngn }}</td>
+                    </tr>
+                    <tr>
+                        <th class="text-muted">Your Balance</th>
+                        <td class="fw-bold">₦{{ wallet.balance }}</td>
+                    </tr>
+                </table>
+
+                {% if wallet.balance >= price_ngn %}
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="country" value="{{ country }}">
+                    <input type="hidden" name="service" value="{{ service }}">
+                    <button type="submit" class="btn btn-primary w-100 py-2">
+                        <i class="fas fa-check me-2"></i> Confirm & Buy
+                    </button>
+                </form>
+                {% else %}
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Insufficient balance. Please fund your wallet first.
+                </div>
+                <a href="{% url 'add_funds' %}" class="btn btn-success w-100">
+                    <i class="fas fa-wallet me-2"></i> Add Funds
+                </a>
+                {% endif %}
+
+                <a href="{% url 'virtual_numbers:number_list' %}" class="btn btn-outline-secondary w-100 mt-2">
+                    <i class="fas fa-arrow-left me-2"></i> Back
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

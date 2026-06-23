@@ -1,0 +1,79 @@
+{% extends 'layouts/base.html' %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-7">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body p-4">
+                <h4 class="fw-bold mb-4">
+                    <i class="fas fa-phone me-2 text-primary"></i> Number Details
+                </h4>
+
+                <!-- Phone Number Display -->
+                <div class="text-center p-4 mb-4 rounded" style="background: #f8fafc;">
+                    <p class="text-muted mb-1">Your Number</p>
+                    <h2 class="fw-bold text-primary">{{ number.phone_number }}</h2>
+                    <span class="badge 
+                        {% if number.status == 'received' %}bg-success
+                        {% elif number.status == 'cancelled' %}bg-danger
+                        {% elif number.status == 'completed' %}bg-primary
+                        {% elif number.status == 'expired' %}bg-secondary
+                        {% else %}bg-warning{% endif %} px-3 py-2">
+                        {{ number.get_status_display }}
+                    </span>
+                </div>
+
+                <!-- OTP Code -->
+                {% if number.otp_code %}
+                <div class="alert alert-success text-center">
+                    <p class="mb-1 text-muted">OTP Code Received</p>
+                    <h1 class="fw-bold text-success">{{ number.otp_code }}</h1>
+                </div>
+                {% else %}
+                <div class="alert alert-warning text-center">
+                    <i class="fas fa-spinner fa-spin me-2"></i> Waiting for SMS...
+                </div>
+                {% endif %}
+
+                <table class="table table-borderless">
+                    <tr>
+                        <th class="text-muted">Service</th>
+                        <td>{{ number.service|title }}</td>
+                    </tr>
+                    <tr>
+                        <th class="text-muted">Country</th>
+                        <td>{{ number.country.name }}</td>
+                    </tr>
+                    <tr>
+                        <th class="text-muted">Amount Paid</th>
+                        <td>₦{{ number.price }}</td>
+                    </tr>
+                    <tr>
+                        <th class="text-muted">Date</th>
+                        <td>{{ number.created_at|date:"M d, Y H:i" }}</td>
+                    </tr>
+                </table>
+
+                {% if number.status == 'pending' or number.status == 'received' %}
+                <form method="post" class="d-flex gap-2 flex-wrap">
+                    {% csrf_token %}
+                    <button name="action" value="check" class="btn btn-primary flex-grow-1">
+                        <i class="fas fa-refresh me-2"></i> Check SMS
+                    </button>
+                    <button name="action" value="finish" class="btn btn-success flex-grow-1">
+                        <i class="fas fa-check me-2"></i> Finish
+                    </button>
+                    <button name="action" value="cancel" class="btn btn-danger flex-grow-1"
+                        onclick="return confirm('Cancel and get refund?')">
+                        <i class="fas fa-times me-2"></i> Cancel & Refund
+                    </button>
+                </form>
+                {% endif %}
+
+                <a href="{% url 'virtual_numbers:my_numbers' %}" class="btn btn-outline-secondary w-100 mt-3">
+                    <i class="fas fa-list me-2"></i> My Numbers
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

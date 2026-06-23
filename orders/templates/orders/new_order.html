@@ -1,0 +1,142 @@
+{% extends "layouts/base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card border-0 shadow-sm" style="border-radius: 15px;">
+            <div class="card-body p-4">
+                <h4 class="fw-bold mb-4"><i class="fas fa-cart-plus text-primary me-2"></i> Place New Order</h4>
+                
+                <form method="POST" id="orderForm">
+                    {% csrf_token %}
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">🔍 Search & Filter Services</label>
+                        <input type="text" id="serviceSearch" class="form-control p-3 mb-2" placeholder="Type here to search (e.g., Instagram, Facebook, TikTok, Followers)..." style="border-radius: 10px; background-color: #fafafa;">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Select Service Package</label>
+                        <select name="service" id="serviceSelect" class="form-select p-3" required>
+                            <option value="" data-price="0">Choose a service...</option>
+                            
+                            {% regroup services by category as category_list %}
+                            {% for category in category_list %}
+                            <optgroup label="📂 {{ category.grouper }}" data-category="{{ category.grouper|lower }}">
+                                {% for service in category.list %}
+                                <option value="{{ service.id }}" data-price="{{ service.get_naira_price }}">
+                                    {{ service.name }} - ₦{{ service.get_naira_price }} per 1k
+                                </option>
+                                {% endfor %}
+                            </optgroup>
+                            {% endfor %}
+                        </select>
+                        <small id="searchFeedback" class="text-muted d-none" style="margin-top: 5px; display: block;">No matching options found inside active groups.</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Target Link</label>
+                        <input type="url" name="link" class="form-control p-3" placeholder="https://instagram.com/p/..." required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Quantity</label>
+                        <input type="number" name="quantity" id="quantityInput" class="form-control p-3" placeholder="Min: 100" required>
+                    </div>
+
+                    <div class="alert alert-info border-0 d-flex justify-content-between align-items-center">
+                        <span class="fw-bold">Total Charge:</span>
+                        <h4 class="mb-0 fw-bold">₦<span id="totalCharge">0.00</span></h4>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100 p-3 fw-bold shadow-sm" style="border-radius: 10px;">
+                        Place Order
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const serviceSearch = document.getElementById('serviceSearch');
+    const serviceSelect = document.getElementById('serviceSelect');
+    const quantityInput = document.getElementById('quantityInput');
+    const totalCharge = document.getElementById('totalCharge');
+    const searchFeedback = document.getElementById('searchFeedback');
+
+    // --- 🧮 Math Logic for Price Calculation ---
+    function calculateCost() {
+        const selectedOption = serviceSelect.options[serviceSelect.selectedIndex];
+        if (!selectedOption) return;
+        
+        const pricePer1k = parseFloat(selectedOption.getAttribute('data-price')) || 0;
+        const quantity = parseFloat(quantityInput.value) || 0;
+        
+        const cost = (pricePer1k / 1000) * quantity;
+        totalCharge.innerText = cost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    // --- 🔍 Universal Search Filtering Logic ---
+    function filterServices() {
+        const searchTerm = serviceSearch.value.toLowerCase().trim();
+        const allOptGroups = serviceSelect.querySelectorAll('optgroup');
+        let totalVisible = 0;
+
+        // If search bar is completely cleared, instantly restore everything
+        if (searchTerm === "") {
+            allOptGroups.forEach(group => {
+                group.style.display = "";
+                Array.from(group.options).forEach(opt => opt.removeAttribute('disabled'));
+            });
+            searchFeedback.classList.add('d-none');
+            return;
+        }
+
+        // Loop through categories (optgroups)
+        allOptGroups.forEach(group => {
+            const categoryName = group.getAttribute('data-category') || "";
+            const options = Array.from(group.options);
+            let matchInGroup = false;
+
+            options.forEach(opt => {
+                const optionText = opt.text.toLowerCase();
+                
+                // Check if either the group name OR individual service title contains the search keyword
+                if (optionText.includes(searchTerm) || categoryName.includes(searchTerm)) {
+                    opt.removeAttribute('disabled'); // Show it
+                    matchInGroup = true;
+                    totalVisible++;
+                } else {
+                    opt.setAttribute('disabled', 'disabled'); // Native trick to hide option inside optgroups shards
+                    
+                    // Clear out selection if it gets filtered away
+                    if (serviceSelect.value === opt.value) {
+                        serviceSelect.value = "";
+                        totalCharge.innerText = "0.00";
+                    }
+                }
+            });
+
+            // If at least one option matches inside this category, display the whole group; otherwise hide it
+            if (matchInGroup) {
+                group.style.display = "";
+            } else {
+                group.style.display = "none";
+            }
+        });
+
+        // Toggle error feedback if everything is hidden
+        if (totalVisible === 0) {
+            searchFeedback.classList.remove('d-none');
+        } else {
+            searchFeedback.classList.add('d-none');
+        }
+    }
+
+    // Event Bindings
+    serviceSelect.addEventListener('change', calculateCost);
+    quantityInput.addEventListener('input', calculateCost);
+    serviceSearch.addEventListener('input', filterServices);
+</script>
+{% endblock %}
