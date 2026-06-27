@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BID SMM</title>
+    <title>ExRinaLogs SMM</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
@@ -83,14 +83,14 @@
     <button class="btn btn-dark" type="button" data-bs-toggle="offcanvas" data-bs-target="#mobileSidebar">
         <i class="fas fa-bars"></i>
     </button>
-    <h5 class="mb-0 fw-bold text-primary">BID SMM</h5>
+    <h5 class="mb-0 fw-bold text-primary">ExRinaLogs SMM</h5>
     <div class="badge bg-primary rounded-pill p-2">₦{{ wallet.balance }}</div>
 </div>
 
 <!-- DESKTOP SIDEBAR -->
 <div id="sidebar" class="d-none d-lg-block">
     <div class="p-4 mt-2">
-        <h3 class="fw-bold text-white text-center">BID <span style="color: var(--primary);">SMM</span></h3>
+        <h3 class="fw-bold text-white text-center">ExRinaLogs <span style="color: var(--primary);">SMM</span></h3>
     </div>
     <nav class="nav flex-column mt-4">
         <a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}">
@@ -126,7 +126,7 @@
 <!-- MOBILE OFFCANVAS SIDEBAR -->
 <div class="offcanvas offcanvas-start bg-dark text-white" tabindex="-1" id="mobileSidebar" style="width: 280px;">
     <div class="offcanvas-header border-bottom border-secondary">
-        <h5 class="offcanvas-title fw-bold">BID SMM</h5>
+        <h5 class="offcanvas-title fw-bold">ExRinaLogs SMM</h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
     </div>
     <div class="offcanvas-body p-0 mt-3">
