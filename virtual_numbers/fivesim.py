@@ -9,7 +9,7 @@ HEADERS = {
     "Accept": "application/json",
 }
 
-PROFIT_PERCENT = 80
+PROFIT_PERCENT = 120
 USD_TO_NGN = 1600
 
 
