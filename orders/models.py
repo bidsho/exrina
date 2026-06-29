@@ -17,7 +17,7 @@ class Service(models.Model):
 
     def get_naira_price(self):
         exchange_rate = Decimal('1550')
-        profit_multiplier = Decimal('1.2')
+        profit_multiplier = Decimal('1.6')
         return (self.cost_per_1k_usd * exchange_rate * profit_multiplier).quantize(Decimal('0.01'))
 
 
