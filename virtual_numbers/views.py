@@ -6,7 +6,6 @@ from .models import PurchasedNumber, Country
 from . import fivesim
 from decimal import Decimal
 
-
 SERVICES = [
     {'key': 'whatsapp', 'label': 'WhatsApp', 'icon': 'fab fa-whatsapp', 'color': 'text-success'},
     {'key': 'telegram', 'label': 'Telegram', 'icon': 'fab fa-telegram', 'color': 'text-primary'},
@@ -15,7 +14,6 @@ SERVICES = [
     {'key': 'twitter', 'label': 'Twitter/X', 'icon': 'fab fa-twitter', 'color': 'text-info'},
     {'key': 'instagram', 'label': 'Instagram', 'icon': 'fab fa-instagram', 'color': 'text-danger'},
 ]
-
 
 @login_required
 def number_list(request):
@@ -33,11 +31,12 @@ def number_list(request):
         try:
             service_data = fivesim.get_products(selected_country, selected_service)
             if service_data:
+                price_usd = service_data.get('Price', 0)
                 products = [{
                     'country': selected_country,
                     'service': selected_service,
-                    'price_usd': service_data.get('Price', 0),
-                    'price_ngn': fivesim.calculate_price(service_data.get('Price', 0)),
+                    'price_usd': price_usd,
+                    'price_ngn': fivesim.calculate_price(price_usd),
                     'count': service_data.get('Qty', 0),
                 }]
             else:
@@ -52,7 +51,6 @@ def number_list(request):
         'selected_country': selected_country,
         'selected_service': selected_service,
     })
-
 
 @login_required
 def buy_number(request):
@@ -72,7 +70,10 @@ def buy_number(request):
         if not service_data:
             messages.error(request, 'Service not available for this country.')
             return redirect('virtual_numbers:number_list')
-        price_ngn = Decimal(str(fivesim.calculate_price(service_data.get('Price', 0))))
+        
+        # Explicitly extract and format both currency amounts
+        price_usd = Decimal(str(service_data.get('Price', 0)))
+        price_ngn = Decimal(str(fivesim.calculate_price(price_usd)))
     except Exception as e:
         messages.error(request, f'Failed to get price: {str(e)}')
         return redirect('virtual_numbers:number_list')
@@ -90,16 +91,17 @@ def buy_number(request):
             messages.error(request, f'5sim error: {result}')
             return redirect('virtual_numbers:number_list')
 
-        # Deduct wallet
+        # Deduct wallet balance
         wallet.balance -= price_ngn
         wallet.save()
 
-        # Get or create country
+        # Get or create country entry
         country_obj, _ = Country.objects.get_or_create(
             code=country,
             defaults={'name': country.title()}
         )
 
+        # Create the purchase log including cost_price_usd
         purchased = PurchasedNumber.objects.create(
             user=request.user,
             country=country_obj,
@@ -108,6 +110,7 @@ def buy_number(request):
             provider='5sim',
             provider_order_id=str(result['id']),
             price=price_ngn,
+            cost_price_usd=price_usd,  # Maps directly to your new database column
             status='pending'
         )
 
@@ -120,7 +123,6 @@ def buy_number(request):
         'price_ngn': price_ngn,
         'wallet': wallet,
     })
-
 
 @login_required
 def number_detail(request, pk):
@@ -162,12 +164,10 @@ def number_detail(request, pk):
 
     return render(request, 'virtual_numbers/number_detail.html', {'number': number})
 
-
 @login_required
 def my_numbers(request):
     numbers = PurchasedNumber.objects.filter(user=request.user)
     return render(request, 'virtual_numbers/my_numbers.html', {'numbers': numbers})
-
 
 @login_required
 def debug_api(request):
