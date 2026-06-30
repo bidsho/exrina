@@ -80,34 +80,26 @@ def buy_number(request):
         messages.error(request, f'Failed to get current pricing: {str(e)}')
         return redirect('virtual_numbers:number_list')
 
-    # Guard clause: Check balance pre-transaction to reduce API churn
     if request.user.wallet.balance < price_ngn:
         messages.error(request, f'Insufficient balance. Your balance is ₦{request.user.wallet.balance}')
         return redirect('virtual_numbers:number_list')
 
     if request.method == 'POST':
-        # API calls should happen OUTSIDE atomic blocks if they take too long,
-        # but wallet adjustments must be strictly atomic.
         result = fivesim.buy_number(country, service)
 
         if 'error' in result or 'id' not in result:
             messages.error(request, f'Provider Error: {result.get("error", "Unknown internal error")}')
             return redirect('virtual_numbers:number_list')
 
-        # Execution Safe Guard: Process wallet balances atomically
         try:
             with transaction.atomic():
-                # Lock row to prevent dual-form submission race conditions
                 wallet = request.user.wallet.__class__.objects.select_for_update().get(pk=request.user.wallet.pk)
                 
                 if wallet.balance < price_ngn:
-                    # Rare case: Balance modified during the api call execution window
-                    # If this hits, we immediately cancel order on provider to avoid lost funds
                     fivesim.cancel_order(str(result['id']))
                     messages.error(request, 'Transaction aborted: balance changed.')
                     return redirect('virtual_numbers:number_list')
 
-                # Deduct exactly what was displayed on page confirmation
                 wallet.balance -= price_ngn
                 wallet.save()
 
@@ -116,6 +108,7 @@ def buy_number(request):
                     defaults={'name': country.title()}
                 )
 
+                # FIX: Cleaned up configuration property references to ensure the phone number is stored correctly
                 purchased = PurchasedNumber.objects.create(
                     user=request.user,
                     country=country_obj,
@@ -124,7 +117,7 @@ def buy_number(request):
                     provider='5sim',
                     provider_order_id=str(result['id']),
                     cost_price_usd=cost_usd,
-                    cost_price_ngn=cost_cost_ngn if 'cost_ngn' in locals() else cost_ngn,
+                    cost_price_ngn=cost_ngn,
                     price=price_ngn,
                     status='pending'
                 )
@@ -163,7 +156,6 @@ def number_detail(request, pk):
                     number.save()
                     messages.success(request, f'OTP received: {number.otp_code}')
                 else:
-                    # Update status to match 5sim remote status if expired
                     remote_status = result.get('status', 'pending')
                     if remote_status in ['CANCELED', 'TIMEOUT']:
                         with transaction.atomic():
@@ -188,7 +180,6 @@ def number_detail(request, pk):
                 messages.success(request, 'Order completed successfully.')
 
         elif action == 'cancel':
-            # Run inside atomic block to verify user status safely
             with transaction.atomic():
                 number = get_object_or_404(PurchasedNumber.objects.select_for_update(), pk=pk, user=request.user)
                 
@@ -204,7 +195,7 @@ def number_detail(request, pk):
                     number.save()
                     
                     wallet = request.user.wallet.__class__.objects.select_for_update().get(pk=request.user.wallet.pk)
-                    wallet.balance += number.price  # Accurate refund of the exact amount they paid
+                    wallet.balance += number.price
                     wallet.save()
                     messages.success(request, 'Order cancelled and successfully refunded.')
 
@@ -221,9 +212,6 @@ def my_numbers(request):
 
 @login_required
 def country_profitability(request):
-    """
-    Provides full country-wise profitability metric analysis dashboards.
-    """
     if not request.user.is_staff:
         return JsonResponse({'error': 'Unauthorized'}, status=403)
 
@@ -243,7 +231,6 @@ def country_profitability(request):
 
 @login_required
 def debug_api(request):
-    """Temporary endpoint to check live API responses and configuration"""
     country = request.GET.get('country', 'austria')
     service = request.GET.get('service', 'whatsapp')
     countries = fivesim.get_countries()
@@ -255,4 +242,4 @@ def debug_api(request):
         'products': raw_products,
         'country': country,
         'service': service,
-    })    
+    })
