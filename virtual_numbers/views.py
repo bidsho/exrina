@@ -239,3 +239,20 @@ def country_profitability(request):
         .order_by('-net_profit')
     )
     return JsonResponse({'analytics': list(profit_report)})
+
+
+@login_required
+def debug_api(request):
+    """Temporary endpoint to check live API responses and configuration"""
+    country = request.GET.get('country', 'austria')
+    service = request.GET.get('service', 'whatsapp')
+    countries = fivesim.get_countries()
+    raw_products = fivesim.get_products(country, service)
+    balance = fivesim.get_balance()
+    return JsonResponse({
+        'balance': balance,
+        'countries_count': len(countries),
+        'products': raw_products,
+        'country': country,
+        'service': service,
+    })    
