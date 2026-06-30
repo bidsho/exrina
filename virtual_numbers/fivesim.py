@@ -11,9 +11,7 @@ HEADERS = {
 }
 
 PROFIT_PERCENT = 180  # 180% profit markup
-# CRITICAL SAFETYS: 5sim operates entirely in Russian Rubles (RUB). 
-# We pad the standard rate (~17.5) to 21.0 to absorb crypto/card funding losses.
-RUB_TO_NGN = 21.0
+USD_TO_NGN = 1600
 
 
 def get_balance():
@@ -51,9 +49,9 @@ def get_products(country, service):
         return {}
 
 
-def calculate_price(rub_price):
-    """Convert 5sim's native RUB price to NGN and add profit markup safely."""
-    ngn_cost = float(rub_price) * RUB_TO_NGN
+def calculate_price(usd_price):
+    """Convert USD to NGN and add profit markup safely."""
+    ngn_cost = float(usd_price) * USD_TO_NGN
     final_selling_price = ngn_cost * (1 + (PROFIT_PERCENT / 100))
     return round(final_selling_price, 2)
 
