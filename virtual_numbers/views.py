@@ -2,10 +2,10 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
-from django.db import transaction, models as db_models
 from .models import PurchasedNumber, Country
 from . import fivesim
 from decimal import Decimal
+
 
 SERVICES = [
     {'key': 'whatsapp', 'label': 'WhatsApp', 'icon': 'fab fa-whatsapp', 'color': 'text-success'},
@@ -72,68 +72,53 @@ def buy_number(request):
         if not service_data:
             messages.error(request, 'Service not available for this country.')
             return redirect('virtual_numbers:number_list')
-        
-        cost_usd = Decimal(str(service_data.get('Price', 0)))
-        cost_ngn = cost_usd * Decimal(str(fivesim.USD_TO_NGN))
-        price_ngn = Decimal(str(fivesim.calculate_price(cost_usd)))
+        price_ngn = Decimal(str(fivesim.calculate_price(service_data.get('Price', 0))))
     except Exception as e:
-        messages.error(request, f'Failed to get current pricing: {str(e)}')
+        messages.error(request, f'Failed to get price: {str(e)}')
         return redirect('virtual_numbers:number_list')
 
-    if request.user.wallet.balance < price_ngn:
-        messages.error(request, f'Insufficient balance. Your balance is ₦{request.user.wallet.balance}')
-        return redirect('virtual_numbers:number_list')
+    wallet = request.user.wallet
 
     if request.method == 'POST':
+        if wallet.balance < price_ngn:
+            messages.error(request, f'Insufficient balance. Your balance is ₦{wallet.balance} but price is ₦{price_ngn}')
+            return redirect('virtual_numbers:number_list')
+
         result = fivesim.buy_number(country, service)
 
         if 'error' in result or 'id' not in result:
-            messages.error(request, f'Provider Error: {result.get("error", "Unknown internal error")}')
+            messages.error(request, f'5sim error: {result}')
             return redirect('virtual_numbers:number_list')
 
-        try:
-            with transaction.atomic():
-                wallet = request.user.wallet.__class__.objects.select_for_update().get(pk=request.user.wallet.pk)
-                
-                if wallet.balance < price_ngn:
-                    fivesim.cancel_order(str(result['id']))
-                    messages.error(request, 'Transaction aborted: balance changed.')
-                    return redirect('virtual_numbers:number_list')
+        # Deduct wallet
+        wallet.balance -= price_ngn
+        wallet.save()
 
-                wallet.balance -= price_ngn
-                wallet.save()
+        # Get or create country
+        country_obj, _ = Country.objects.get_or_create(
+            code=country,
+            defaults={'name': country.title()}
+        )
 
-                country_obj, _ = Country.objects.get_or_create(
-                    code=country,
-                    defaults={'name': country.title()}
-                )
+        purchased = PurchasedNumber.objects.create(
+            user=request.user,
+            country=country_obj,
+            service=service,
+            phone_number=result['phone'],
+            provider='5sim',
+            provider_order_id=str(result['id']),
+            price=price_ngn,
+            status='pending'
+        )
 
-                # FIX: Cleaned up configuration property references to ensure the phone number is stored correctly
-                purchased = PurchasedNumber.objects.create(
-                    user=request.user,
-                    country=country_obj,
-                    service=service,
-                    phone_number=result['phone'],
-                    provider='5sim',
-                    provider_order_id=str(result['id']),
-                    cost_price_usd=cost_usd,
-                    cost_price_ngn=cost_ngn,
-                    price=price_ngn,
-                    status='pending'
-                )
-
-            messages.success(request, f'Number {result["phone"]} assigned!')
-            return redirect('virtual_numbers:number_detail', pk=purchased.pk)
-
-        except Exception as transaction_err:
-            messages.error(request, f'System error processing order: {str(transaction_err)}')
-            return redirect('virtual_numbers:number_list')
+        messages.success(request, f'Number {result["phone"]} assigned!')
+        return redirect('virtual_numbers:number_detail', pk=purchased.pk)
 
     return render(request, 'virtual_numbers/buy_number.html', {
         'country': country,
         'service': service,
         'price_ngn': price_ngn,
-        'wallet': request.user.wallet,
+        'wallet': wallet,
     })
 
 
@@ -147,7 +132,7 @@ def number_detail(request, pk):
         if action == 'check':
             result = fivesim.check_order(number.provider_order_id)
             if 'error' in result:
-                messages.error(request, f'Error checking status: {result["error"]}')
+                messages.error(request, f'Error: {result["error"]}')
             else:
                 sms_list = result.get('sms', [])
                 if sms_list:
@@ -156,48 +141,22 @@ def number_detail(request, pk):
                     number.save()
                     messages.success(request, f'OTP received: {number.otp_code}')
                 else:
-                    remote_status = result.get('status', 'pending')
-                    if remote_status in ['CANCELED', 'TIMEOUT']:
-                        with transaction.atomic():
-                            number = PurchasedNumber.objects.select_for_update().get(pk=number.pk)
-                            if number.status not in ['cancelled', 'expired']:
-                                number.status = 'expired'
-                                number.save()
-                                wallet = request.user.wallet.__class__.objects.select_for_update().get(pk=request.user.wallet.pk)
-                                wallet.balance += number.price
-                                wallet.save()
-                                messages.warning(request, 'Order expired on provider. Balance refunded.')
-                    else:
-                        messages.info(request, 'No SMS yet. Please wait and try again.')
+                    messages.info(request, 'No SMS yet. Please wait and try again.')
 
         elif action == 'finish':
-            result = fivesim.finish_order(number.provider_order_id)
-            if 'error' in result:
-                messages.error(request, f'Could not complete: {result["error"]}')
-            else:
-                number.status = 'completed'
-                number.save()
-                messages.success(request, 'Order completed successfully.')
+            fivesim.finish_order(number.provider_order_id)
+            number.status = 'completed'
+            number.save()
+            messages.success(request, 'Order completed.')
 
         elif action == 'cancel':
-            with transaction.atomic():
-                number = get_object_or_404(PurchasedNumber.objects.select_for_update(), pk=pk, user=request.user)
-                
-                if number.status in ['cancelled', 'completed']:
-                    messages.error(request, 'This order cannot be altered.')
-                    return redirect('virtual_numbers:number_detail', pk=pk)
-                
-                result = fivesim.cancel_order(number.provider_order_id)
-                if 'error' in result:
-                    messages.error(request, f'Provider denied cancellation: {result["error"]}')
-                else:
-                    number.status = 'cancelled'
-                    number.save()
-                    
-                    wallet = request.user.wallet.__class__.objects.select_for_update().get(pk=request.user.wallet.pk)
-                    wallet.balance += number.price
-                    wallet.save()
-                    messages.success(request, 'Order cancelled and successfully refunded.')
+            fivesim.cancel_order(number.provider_order_id)
+            number.status = 'cancelled'
+            number.save()
+            wallet = request.user.wallet
+            wallet.balance += number.price
+            wallet.save()
+            messages.success(request, 'Order cancelled and refunded.')
 
         return redirect('virtual_numbers:number_detail', pk=pk)
 
@@ -206,27 +165,8 @@ def number_detail(request, pk):
 
 @login_required
 def my_numbers(request):
-    numbers = PurchasedNumber.objects.filter(user=request.user).order_by('-created_at')
+    numbers = PurchasedNumber.objects.filter(user=request.user)
     return render(request, 'virtual_numbers/my_numbers.html', {'numbers': numbers})
-
-
-@login_required
-def country_profitability(request):
-    if not request.user.is_staff:
-        return JsonResponse({'error': 'Unauthorized'}, status=403)
-
-    profit_report = (
-        PurchasedNumber.objects.exclude(status__in=['cancelled', 'expired'])
-        .values('country__name', 'country__code')
-        .annotate(
-            total_orders=db_models.Count('id'),
-            total_revenue=db_models.Sum('price'),
-            total_cost=db_models.Sum('cost_price_ngn'),
-            net_profit=db_models.Sum(db_models.F('price') - db_models.F('cost_price_ngn'))
-        )
-        .order_by('-net_profit')
-    )
-    return JsonResponse({'analytics': list(profit_report)})
 
 
 @login_required
