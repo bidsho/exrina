@@ -31,12 +31,12 @@ def number_list(request):
         try:
             service_data = fivesim.get_products(selected_country, selected_service)
             if service_data:
-                price_usd = service_data.get('Price', 0)
+                price_rub = service_data.get('Price', 0)
                 products = [{
                     'country': selected_country,
                     'service': selected_service,
-                    'price_usd': price_usd,
-                    'price_ngn': fivesim.calculate_price(price_usd),
+                    'price_usd': price_rub,  # Keeping layout key compatible with your template
+                    'price_ngn': fivesim.calculate_price(price_rub),
                     'count': service_data.get('Qty', 0),
                 }]
             else:
@@ -71,9 +71,8 @@ def buy_number(request):
             messages.error(request, 'Service not available for this country.')
             return redirect('virtual_numbers:number_list')
         
-        # Explicitly extract and format both currency amounts
-        price_usd = Decimal(str(service_data.get('Price', 0)))
-        price_ngn = Decimal(str(fivesim.calculate_price(price_usd)))
+        price_rub = Decimal(str(service_data.get('Price', 0)))
+        price_ngn = Decimal(str(fivesim.calculate_price(price_rub)))
     except Exception as e:
         messages.error(request, f'Failed to get price: {str(e)}')
         return redirect('virtual_numbers:number_list')
@@ -81,27 +80,40 @@ def buy_number(request):
     wallet = request.user.wallet
 
     if request.method == 'POST':
+        # Stage 1: Fast check against original quote
         if wallet.balance < price_ngn:
             messages.error(request, f'Insufficient balance. Your balance is ₦{wallet.balance} but price is ₦{price_ngn}')
             return redirect('virtual_numbers:number_list')
 
+        # Execute 5sim API acquisition
         result = fivesim.buy_number(country, service)
 
         if 'error' in result or 'id' not in result:
-            messages.error(request, f'5sim error: {result}')
+            messages.error(request, f'5sim error: {result.get("error", result)}')
             return redirect('virtual_numbers:number_list')
 
-        # Deduct wallet balance
-        wallet.balance -= price_ngn
+        # Stage 2: Capture exact real-time cost deducted by 5sim 
+        actual_rub_price = result.get('price', 0)
+        if actual_rub_price > 0:
+            final_price_ngn = Decimal(str(fivesim.calculate_price(actual_rub_price)))
+        else:
+            final_price_ngn = price_ngn
+
+        # Stage 3: Prevent exploitation if prices spike mid-flight
+        if wallet.balance < final_price_ngn:
+            fivesim.cancel_order(str(result['id']))
+            messages.error(request, 'Price updated during purchase. Order automatically reversed for security.')
+            return redirect('virtual_numbers:number_list')
+
+        # Safe transaction execution
+        wallet.balance -= final_price_ngn
         wallet.save()
 
-        # Get or create country entry
         country_obj, _ = Country.objects.get_or_create(
             code=country,
             defaults={'name': country.title()}
         )
 
-        # Create the purchase log including cost_price_usd
         purchased = PurchasedNumber.objects.create(
             user=request.user,
             country=country_obj,
@@ -109,8 +121,8 @@ def buy_number(request):
             phone_number=result['phone'],
             provider='5sim',
             provider_order_id=str(result['id']),
-            price=price_ngn,
-            cost_price_usd=price_usd,  # Maps directly to your new database column
+            price=final_price_ngn,
+            cost_price_usd=Decimal(str(actual_rub_price)),  # Storing native RUB cost inside column safely
             status='pending'
         )
 
@@ -155,6 +167,8 @@ def number_detail(request, pk):
             fivesim.cancel_order(number.provider_order_id)
             number.status = 'cancelled'
             number.save()
+            
+            # Safe refund using precise recorded purchase price
             wallet = request.user.wallet
             wallet.balance += number.price
             wallet.save()
