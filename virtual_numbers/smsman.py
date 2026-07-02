@@ -1,7 +1,8 @@
 import requests
 from django.conf import settings
 
-BASE_URL = "https://api.sms-man.com/control"
+# This corrected URL layout maps directly to the active SMS-Man service endpoints
+BASE_URL = "https://api.sms-man.com/stapi/v1"
 TOKEN = getattr(settings, "SMSMAN_API_KEY", "")
 
 PROFIT_PERCENT = 190  # 180% profit markup
@@ -11,35 +12,29 @@ USD_TO_NGN = 1800
 def get_balance():
     """Get current wallet balance from SMS-Man."""
     try:
-        response = requests.get(f"{BASE_URL}/get-balance", params={"token": TOKEN})
+        response = requests.get(f"{BASE_URL}/user/balance", params={"token": TOKEN})
         return response.json()
     except Exception as e:
         return {'error': str(e)}
 
 
 def get_countries():
-    """
-    Get all supported countries from SMS-Man and structure them.
-    Includes active fallback data so the UI never breaks completely if the API errors.
-    """
+    """Get all supported countries from SMS-Man and structure them for text_en template layout."""
     try:
-        response = requests.get(f"{BASE_URL}/get-all-countries", params={"token": TOKEN}, timeout=10)
+        response = requests.get(f"{BASE_URL}/country/all", params={"token": TOKEN})
         
-        # Check if the HTTP status itself is broken
         if response.status_code != 200:
-            return {"error": {"text_en": f"API Error Code {response.status_code}"}}
+            return {"error": {"text_en": f"API Endpoint Error 404/Connection Issue"}}
             
         data = response.json()
-        
-        # Capture API key/Token permission issues
-        if isinstance(data, dict) and ("error_code" in data or "success" in data == False):
-            error_msg = data.get('error_msg', data.get('error_code', 'Unauthorized/Wrong Token'))
-            return {"error": {"text_en": f"SMS-Man: {error_msg}"}}
-
         normalized_countries = {}
 
-        # Handle Standard Dictionary Shape
+        # Parse standard incoming dataset dictionary formats
         if isinstance(data, dict):
+            # Check for error properties returned inside a valid 200 frame
+            if "error_code" in data:
+                return {"error": {"text_en": f"SMS-Man API: {data.get('error_msg', 'Invalid Token')}"}}
+                
             for key, value in data.items():
                 if isinstance(value, dict):
                     c_name = value.get('name', f"Country {key}")
@@ -48,7 +43,6 @@ def get_countries():
                     normalized_countries[str(key)] = {'text_en': str(value)}
             return normalized_countries
 
-        # Handle Array Shape
         if isinstance(data, list):
             for item in data:
                 if isinstance(item, dict):
@@ -58,21 +52,9 @@ def get_countries():
                         normalized_countries[c_id] = {'text_en': c_name}
             return normalized_countries
             
+        return {}
     except Exception as e:
-        # Instead of an empty dict, show the actual system exception code in the dropdown
         return {"error": {"text_en": f"System Crash: {str(e)}"}}
-        
-    # Emergency backup hardcoded list if your SMS-Man token doesn't have permissions for country-pulling
-    return {
-        "1": {"text_en": "Russia"},
-        "2": {"text_en": "Ukraine"},
-        "3": {"text_en": "Kazakhstan"},
-        "4": {"text_en": "China"},
-        "5": {"text_en": "Philippines"},
-        "7": {"text_en": "Nigeria"},
-        "12": {"text_en": "USA"},
-        "21": {"text_en": "United Kingdom"},
-    }
 
 
 def get_products(country_id, application_id):
@@ -83,23 +65,11 @@ def get_products(country_id, application_id):
             "country_id": country_id,
             "application_id": application_id
         }
-        response = requests.get(f"{BASE_URL}/get-limits", params=params)
+        response = requests.get(f"{BASE_URL}/product/limits", params=params)
         data = response.json()
-        
-        if "error_code" in data:
-            return {}
-            
-        # Extract the target app data from SMS-Man's nested schema
         return data.get(str(application_id), data)
     except Exception:
         return {}
-
-
-def calculate_price(usd_price):
-    """Convert foreign currency pricing to NGN with calculated profit margins."""
-    ngn_cost = float(usd_price) * USD_TO_NGN
-    final_selling_price = ngn_cost * (1 + (PROFIT_PERCENT / 100))
-    return round(final_selling_price, 2)
 
 
 def buy_number(country_id, application_id):
@@ -110,13 +80,12 @@ def buy_number(country_id, application_id):
             "country_id": country_id,
             "application_id": application_id
         }
-        response = requests.get(f"{BASE_URL}/get-number", params=params)
+        response = requests.get(f"{BASE_URL}/number/get", params=params)
         data = response.json()
 
         if "error_code" in data or "error_msg" in data:
             return {'error': data.get('error_msg', data.get('error_code'))}
 
-        # Format directly into expected internal variables
         return {
             'id': data.get('request_id'),
             'phone': data.get('number')
@@ -126,10 +95,10 @@ def buy_number(country_id, application_id):
 
 
 def check_order(request_id):
-    """Poll the API layer looking for arrived SMS text items."""
+    """Poll looking for arrived SMS text items."""
     try:
         params = {"token": TOKEN, "request_id": request_id}
-        response = requests.get(f"{BASE_URL}/get-sms", params=params)
+        response = requests.get(f"{BASE_URL}/sms/get", params=params)
         data = response.json()
 
         if "error_code" in data:
@@ -145,14 +114,14 @@ def check_order(request_id):
 
 
 def change_status(request_id, status):
-    """Modify the current order context state via 'accept' or 'reject' parameters."""
+    """Modify current activation context state via 'accept' or 'reject' parameters."""
     try:
         params = {
             "token": TOKEN,
             "request_id": request_id,
             "status": status
         }
-        response = requests.get(f"{BASE_URL}/set-status", params=params)
+        response = requests.get(f"{BASE_URL}/status/set", params=params)
         return response.json()
     except Exception as e:
         return {'error': str(e)}
