@@ -55,6 +55,7 @@ FIVESIM_API_KEY = os.getenv('FIVESIM_API_KEY')
 PAYSTACK_PUBLIC_KEY = os.getenv('PAYSTACK_PUBLIC_KEY')
 PAYSTACK_SECRET_KEY = os.getenv('PAYSTACK_SECRET_KEY')
 JAP_API_KEY = os.getenv('JAP_API_KEY')  # 👈 Added this line to fetch your JAP Key
+SMSMAN_API_KEY = os.getenv('SMSMAN_API_KEY')
 
 CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost').split(',')
 
