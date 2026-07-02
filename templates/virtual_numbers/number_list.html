@@ -1,4 +1,4 @@
-{% extends 'layouts/base.html' %}
+{% extends 'base.html' %}
 {% block content %}
 <div class="row mb-4">
     <div class="col-12">
@@ -11,24 +11,13 @@
     </div>
 </div>
 
+<!-- Service Filter -->
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
         <form method="get" class="row g-3">
-            <div class="col-md-4">
-                <label class="form-label fw-bold">Country</label>
-                <select name="country" class="form-select">
-                    <option value="">-- Select Country --</option>
-                    {% for code, info in countries.items %}
-                    <option value="{{ code }}"
-                        {% if selected_country == code %}selected{% endif %}>
-                        {{ info.text_en|default:code|title }}
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-4">
-                <label class="form-label fw-bold">Service</label>
-                <select name="service" class="form-select">
+            <div class="col-md-6">
+                <label class="form-label fw-bold">Select Service</label>
+                <select name="service" class="form-select" onchange="this.form.submit()">
                     {% for svc in services %}
                     <option value="{{ svc.key }}"
                         {% if selected_service == svc.key %}selected{% endif %}>
@@ -37,7 +26,7 @@
                     {% endfor %}
                 </select>
             </div>
-            <div class="col-md-4 d-flex align-items-end">
+            <div class="col-md-6 d-flex align-items-end">
                 <button type="submit" class="btn btn-primary w-100">
                     <i class="fas fa-search me-2"></i> Search
                 </button>
@@ -46,6 +35,7 @@
     </div>
 </div>
 
+<!-- Results -->
 <div class="row">
     {% for product in products %}
     <div class="col-md-4 mb-4">
@@ -57,9 +47,12 @@
                     <h5 class="fw-bold">{{ svc.label }}</h5>
                     {% endif %}
                 {% endfor %}
-                <p class="text-muted">{{ product.country|title }}</p>
+                <p class="text-muted fw-bold">{{ product.country_name }}</p>
                 <h4 class="text-primary fw-bold">₦{{ product.price_ngn }}</h4>
-                <p class="text-muted small">{{ product.count }} numbers available</p>
+                <p class="text-muted small">
+                    <i class="fas fa-check-circle text-success"></i>
+                    {{ product.count }} numbers available
+                </p>
                 <a href="{% url 'virtual_numbers:buy_number' %}?country={{ product.country }}&service={{ product.service }}"
                     class="btn btn-primary w-100 mt-2">
                     <i class="fas fa-shopping-cart me-2"></i> Buy Number
@@ -68,19 +61,11 @@
         </div>
     </div>
     {% empty %}
-    {% if selected_country %}
     <div class="col-12">
         <div class="alert alert-info">
-            <i class="fas fa-info-circle me-2"></i> No numbers available. Try a different country or service.
+            <i class="fas fa-info-circle me-2"></i> No numbers available. Try another service.
         </div>
     </div>
-    {% else %}
-    <div class="col-12">
-        <div class="alert alert-info">
-            <i class="fas fa-info-circle me-2"></i> Select a country and service to see available numbers.
-        </div>
-    </div>
-    {% endif %}
     {% endfor %}
 </div>
 {% endblock %}

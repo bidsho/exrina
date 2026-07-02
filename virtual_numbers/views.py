@@ -6,20 +6,20 @@ from .models import PurchasedNumber, Country
 from . import smsman
 from decimal import Decimal
 
-# SMS-Man application numeric IDs mapped to frontend presentation assets
+
 SERVICES = [
-    {'key': '1', 'label': 'WhatsApp', 'icon': 'fab fa-whatsapp', 'color': 'text-success'},
-    {'key': '2', 'label': 'Telegram', 'icon': 'fab fa-telegram', 'color': 'text-primary'},
-    {'key': '3', 'label': 'Gmail', 'icon': 'fas fa-envelope', 'color': 'text-danger'},
-    {'key': '4', 'label': 'Facebook', 'icon': 'fab fa-facebook', 'color': 'text-primary'},
+    {'key': '6', 'label': 'WhatsApp', 'icon': 'fab fa-whatsapp', 'color': 'text-success'},
+    {'key': '5', 'label': 'Telegram', 'icon': 'fab fa-telegram', 'color': 'text-primary'},
+    {'key': '2', 'label': 'Gmail', 'icon': 'fas fa-envelope', 'color': 'text-danger'},
+    {'key': '3', 'label': 'Facebook', 'icon': 'fab fa-facebook', 'color': 'text-primary'},
     {'key': '11', 'label': 'Twitter/X', 'icon': 'fab fa-twitter', 'color': 'text-info'},
-    {'key': '5', 'label': 'Instagram', 'icon': 'fab fa-danger', 'color': 'text-danger'},
+    {'key': '8', 'label': 'Instagram', 'icon': 'fab fa-instagram', 'color': 'text-danger'},
 ]
+
 
 @login_required
 def number_list(request):
-    selected_country = request.GET.get('country', '')
-    selected_service = request.GET.get('service', '1')  # Default to SMS-Man WhatsApp ID
+    selected_service = request.GET.get('service', '6')
     products = []
     countries_data = {}
 
@@ -28,31 +28,32 @@ def number_list(request):
     except Exception:
         messages.error(request, 'Failed to load countries.')
 
-    if selected_country and selected_service:
+    if selected_service:
         try:
-            service_data = smsman.get_products(selected_country, selected_service)
-            if service_data:
-                # Handle varying pricing tags in SMS-Man response payloads safely
-                price_usd = service_data.get('price', service_data.get('cost', 0.25))
-                products = [{
-                    'country': selected_country,
+            all_products = smsman.get_all_products(selected_service)
+            products = [
+                {
+                    'country': country_id,
+                    'country_name': countries_data.get(country_id, {}).get('text_en', f'Country {country_id}'),
                     'service': selected_service,
-                    'price_usd': price_usd,
-                    'price_ngn': smsman.calculate_price(price_usd),
-                    'count': service_data.get('count', service_data.get('Qty', 10)),
-                }]
-            else:
-                messages.info(request, 'No numbers available for this selection.')
-        except Exception:
-            messages.error(request, 'Failed to load products.')
+                    'price_usd': data.get('cost', 0),
+                    'price_ngn': smsman.calculate_price(float(data.get('cost', 0))),
+                    'count': data.get('count', 0),
+                }
+                for country_id, data in all_products.items()
+                if data.get('count', 0) > 0
+            ]
+            products = sorted(products, key=lambda x: x['count'], reverse=True)
+        except Exception as e:
+            messages.error(request, f'Failed to load products: {str(e)}')
 
     return render(request, 'virtual_numbers/number_list.html', {
         'countries': countries_data,
         'services': SERVICES,
         'products': products,
-        'selected_country': selected_country,
         'selected_service': selected_service,
     })
+
 
 @login_required
 def buy_number(request):
@@ -72,9 +73,9 @@ def buy_number(request):
         if not service_data:
             messages.error(request, 'Service not available for this country.')
             return redirect('virtual_numbers:number_list')
-            
-        price_usd = Decimal(str(service_data.get('price', service_data.get('cost', 0.25))))
-        price_ngn = Decimal(str(smsman.calculate_price(price_usd)))
+
+        price_usd = Decimal(str(service_data.get('cost', service_data.get('price', 0.25))))
+        price_ngn = Decimal(str(smsman.calculate_price(float(price_usd))))
     except Exception as e:
         messages.error(request, f'Failed to get price: {str(e)}')
         return redirect('virtual_numbers:number_list')
@@ -96,7 +97,6 @@ def buy_number(request):
         wallet.balance -= price_ngn
         wallet.save()
 
-        # Safely convert code to a descriptive title name or fallback
         countries_list = smsman.get_countries()
         country_name = countries_list.get(country, {}).get('text_en', f"Country {country}")
 
@@ -113,7 +113,6 @@ def buy_number(request):
             provider='SMS-Man',
             provider_order_id=str(result['id']),
             price=price_ngn,
-            cost_price_usd=price_usd,
             status='pending'
         )
 
@@ -126,6 +125,7 @@ def buy_number(request):
         'price_ngn': price_ngn,
         'wallet': wallet,
     })
+
 
 @login_required
 def number_detail(request, pk):
@@ -158,7 +158,6 @@ def number_detail(request, pk):
             smsman.change_status(number.provider_order_id, 'reject')
             number.status = 'cancelled'
             number.save()
-            
             wallet = request.user.wallet
             wallet.balance += number.price
             wallet.save()
@@ -168,15 +167,17 @@ def number_detail(request, pk):
 
     return render(request, 'virtual_numbers/number_detail.html', {'number': number})
 
+
 @login_required
 def my_numbers(request):
     numbers = PurchasedNumber.objects.filter(user=request.user)
     return render(request, 'virtual_numbers/my_numbers.html', {'numbers': numbers})
 
+
 @login_required
 def debug_api(request):
-    country = request.GET.get('country', '1')
-    service = request.GET.get('service', '1')
+    country = request.GET.get('country', '7')
+    service = request.GET.get('service', '6')
     countries = smsman.get_countries()
     raw_products = smsman.get_products(country, service)
     balance = smsman.get_balance()

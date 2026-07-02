@@ -67,7 +67,31 @@ def get_products(country_id, application_id):
         if isinstance(data, list) and len(data) > 0:
             return data[0]
         if isinstance(data, dict):
+            if 'cost' in data:
+                return data
             return data.get(str(application_id), data)
+        return {}
+    except Exception:
+        return {}
+
+
+def get_all_products(application_id):
+    """Get all countries with available numbers for a service"""
+    try:
+        response = requests.get(
+            f"{BASE_URL}/get-prices",
+            params={
+                "token": TOKEN,
+                "application_id": application_id
+            }
+        )
+        data = response.json()
+        if isinstance(data, list):
+            return {
+                str(item['country_id']): item
+                for item in data
+                if item.get('count', 0) > 0
+            }
         return {}
     except Exception:
         return {}
