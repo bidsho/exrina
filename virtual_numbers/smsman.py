@@ -18,13 +18,36 @@ def get_balance():
 
 
 def get_countries():
-    """Get all supported countries and their IDs."""
+    """Get all supported countries and normalize the structure for the templates."""
     try:
         response = requests.get(f"{BASE_URL}/get-all-countries", params={"token": TOKEN})
-        return response.json()
-    except Exception as e:
-        return {}
+        data = response.json()
+        
+        # If SMS-Man returns an error, fallback to an empty dict
+        if "error_code" in data:
+            return {}
 
+        normalized_countries = {}
+        
+        # SMS-Man returns a dictionary where keys are numeric strings ('1', '2'...)
+        # and values are objects containing the real 'name'
+        for country_id, info in data.items():
+            if isinstance(info, dict) and 'name' in info:
+                # We save it with the clean uppercase name so it loops perfectly in your select elements
+                normalized_countries[country_id] = {
+                    'name': info['name'].title(),
+                    'id': country_id
+                }
+            else:
+                # Fallback if the endpoint layout returns raw simple key-value strings
+                normalized_countries[country_id] = {
+                    'name': str(info).title(),
+                    'id': country_id
+                }
+                
+        return normalized_countries
+    except Exception:
+        return {}
 
 def get_products(country_id, application_id):
     """
