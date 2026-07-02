@@ -19,19 +19,36 @@ def get_balance():
 
 def get_countries():
     """
-    Get all supported countries from SMS-Man and structure them 
-    with the 'text_en' property expected by your Django template.
+    Get all supported countries from SMS-Man and structure them.
+    Includes active fallback data so the UI never breaks completely if the API errors.
     """
     try:
-        response = requests.get(f"{BASE_URL}/get-all-countries", params={"token": TOKEN})
+        response = requests.get(f"{BASE_URL}/get-all-countries", params={"token": TOKEN}, timeout=10)
+        
+        # Check if the HTTP status itself is broken
+        if response.status_code != 200:
+            return {"error": {"text_en": f"API Error Code {response.status_code}"}}
+            
         data = response.json()
         
-        if isinstance(data, dict) and "error_code" in data:
-            return {}
+        # Capture API key/Token permission issues
+        if isinstance(data, dict) and ("error_code" in data or "success" in data == False):
+            error_msg = data.get('error_msg', data.get('error_code', 'Unauthorized/Wrong Token'))
+            return {"error": {"text_en": f"SMS-Man: {error_msg}"}}
 
         normalized_countries = {}
 
-        # SHAPE 1: API returns a list of items -> [{"id": 1, "name": "Nigeria"}, ...]
+        # Handle Standard Dictionary Shape
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if isinstance(value, dict):
+                    c_name = value.get('name', f"Country {key}")
+                    normalized_countries[str(key)] = {'text_en': c_name}
+                else:
+                    normalized_countries[str(key)] = {'text_en': str(value)}
+            return normalized_countries
+
+        # Handle Array Shape
         if isinstance(data, list):
             for item in data:
                 if isinstance(item, dict):
@@ -40,24 +57,22 @@ def get_countries():
                     if c_id:
                         normalized_countries[c_id] = {'text_en': c_name}
             return normalized_countries
-
-        # IF DATA IS A DICTIONARY:
-        if isinstance(data, dict):
-            for key, value in data.items():
-                # SHAPE 2: Nested dictionary -> {"1": {"id": 1, "name": "Nigeria"}}
-                if isinstance(value, dict):
-                    c_name = value.get('name', f"Country {key}")
-                    normalized_countries[str(key)] = {'text_en': c_name}
-                
-                # SHAPE 3: Flat key-value pair -> {"1": "Nigeria"}
-                else:
-                    normalized_countries[str(key)] = {'text_en': str(value)}
-
-            return normalized_countries
             
-        return {}
-    except Exception:
-        return {}
+    except Exception as e:
+        # Instead of an empty dict, show the actual system exception code in the dropdown
+        return {"error": {"text_en": f"System Crash: {str(e)}"}}
+        
+    # Emergency backup hardcoded list if your SMS-Man token doesn't have permissions for country-pulling
+    return {
+        "1": {"text_en": "Russia"},
+        "2": {"text_en": "Ukraine"},
+        "3": {"text_en": "Kazakhstan"},
+        "4": {"text_en": "China"},
+        "5": {"text_en": "Philippines"},
+        "7": {"text_en": "Nigeria"},
+        "12": {"text_en": "USA"},
+        "21": {"text_en": "United Kingdom"},
+    }
 
 
 def get_products(country_id, application_id):
