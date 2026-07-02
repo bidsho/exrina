@@ -11,7 +11,7 @@ HEADERS = {
 }
 
 PROFIT_PERCENT = 190  # 180% profit markup
-USD_TO_NGN = 1600
+USD_TO_NGN = 1800
 
 
 def get_balance():
