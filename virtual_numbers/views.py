@@ -93,7 +93,6 @@ def buy_number(request):
             messages.error(request, f'SMS-Man error: {result.get("error")}')
             return redirect('virtual_numbers:number_list')
 
-        # Deduct wallet balance
         wallet.balance -= price_ngn
         wallet.save()
 
@@ -174,7 +173,7 @@ def my_numbers(request):
     return render(request, 'virtual_numbers/my_numbers.html', {'numbers': numbers})
 
 
-@login_error
+@login_required
 def debug_api(request):
     country = request.GET.get('country', '7')
     service = request.GET.get('service', '6')
