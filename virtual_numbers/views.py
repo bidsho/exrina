@@ -68,13 +68,17 @@ def buy_number(request):
         messages.error(request, 'Country or service missing.')
         return redirect('virtual_numbers:number_list')
 
+    # FIX: Don't let a strict API check block the initial GET request page load
     try:
         service_data = smsman.get_products(country, service)
-        if not service_data:
-            messages.error(request, 'Service not available for this country.')
-            return redirect('virtual_numbers:number_list')
-
-        price_usd = Decimal(str(service_data.get('cost', service_data.get('price', 0.25))))
+        
+        # If SMS-man returns price info, use it. Otherwise, fallback or safely calculate.
+        if service_data:
+            price_usd = Decimal(str(service_data.get('cost', service_data.get('price', 0.25))))
+        else:
+            # Fallback price so the page doesn't crash or redirect blindly
+            price_usd = Decimal('0.25') 
+            
         price_ngn = Decimal(str(smsman.calculate_price(float(price_usd))))
     except Exception as e:
         messages.error(request, f'Failed to get price: {str(e)}')
@@ -118,13 +122,13 @@ def buy_number(request):
         messages.success(request, f'Number {result["phone"]} assigned!')
         return redirect('virtual_numbers:number_detail', pk=purchased.pk)
 
+    # If it's a GET request, we safely render the confirmation page now
     return render(request, 'virtual_numbers/buy_number.html', {
         'country': country,
         'service': service,
         'price_ngn': price_ngn,
         'wallet': wallet,
     })
-
 
 @login_required
 def number_detail(request, pk):
