@@ -3,43 +3,41 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
 from .models import PurchasedNumber, Country
-from . import smsman  # Renamed from fivesim
+from . import fivesim
 from decimal import Decimal
 
-# ALERT: Ensure these keys match SMS-Man's application IDs (numeric strings/ints)!
 SERVICES = [
-    {'key': '1', 'label': 'WhatsApp', 'icon': 'fab fa-whatsapp', 'color': 'text-success'},
-    {'key': '2', 'label': 'Telegram', 'icon': 'fab fa-telegram', 'color': 'text-primary'},
-    {'key': '3', 'label': 'Gmail', 'icon': 'fas fa-envelope', 'color': 'text-danger'},
-    {'key': '4', 'label': 'Facebook', 'icon': 'fab fa-facebook', 'color': 'text-primary'},
-    {'key': '11', 'label': 'Twitter/X', 'icon': 'fab fa-twitter', 'color': 'text-info'},
-    {'key': '5', 'label': 'Instagram', 'icon': 'fab fa-instagram', 'color': 'text-danger'},
+    {'key': 'whatsapp', 'label': 'WhatsApp', 'icon': 'fab fa-whatsapp', 'color': 'text-success'},
+    {'key': 'telegram', 'label': 'Telegram', 'icon': 'fab fa-telegram', 'color': 'text-primary'},
+    {'key': 'gmail', 'label': 'Gmail', 'icon': 'fas fa-envelope', 'color': 'text-danger'},
+    {'key': 'facebook', 'label': 'Facebook', 'icon': 'fab fa-facebook', 'color': 'text-primary'},
+    {'key': 'twitter', 'label': 'Twitter/X', 'icon': 'fab fa-twitter', 'color': 'text-info'},
+    {'key': 'instagram', 'label': 'Instagram', 'icon': 'fab fa-instagram', 'color': 'text-danger'},
 ]
 
 @login_required
 def number_list(request):
-    selected_country = request.GET.get('country', '')  # Expects numeric ID string now
-    selected_service = request.GET.get('service', '1')  # Expects numeric ID string now
+    selected_country = request.GET.get('country', '')
+    selected_service = request.GET.get('service', 'whatsapp')
     products = []
     countries_data = {}
 
     try:
-        countries_data = smsman.get_countries()
+        countries_data = fivesim.get_countries()
     except Exception:
         messages.error(request, 'Failed to load countries.')
 
     if selected_country and selected_service:
         try:
-            service_data = smsman.get_products(selected_country, selected_service)
+            service_data = fivesim.get_products(selected_country, selected_service)
             if service_data:
-                # Fallback pricing protection if layout changes across packages
-                price_usd = service_data.get('price', service_data.get('cost', 0.2)) 
+                price_usd = service_data.get('Price', 0)
                 products = [{
                     'country': selected_country,
                     'service': selected_service,
                     'price_usd': price_usd,
-                    'price_ngn': smsman.calculate_price(price_usd),
-                    'count': service_data.get('count', service_data.get('Qty', 5)),
+                    'price_ngn': fivesim.calculate_price(price_usd),
+                    'count': service_data.get('Qty', 0),
                 }]
             else:
                 messages.info(request, 'No numbers available for this selection.')
@@ -68,9 +66,14 @@ def buy_number(request):
         return redirect('virtual_numbers:number_list')
 
     try:
-        service_data = smsman.get_products(country, service)
-        price_usd = Decimal(str(service_data.get('price', service_data.get('cost', 0.2))))
-        price_ngn = Decimal(str(smsman.calculate_price(price_usd)))
+        service_data = fivesim.get_products(country, service)
+        if not service_data:
+            messages.error(request, 'Service not available for this country.')
+            return redirect('virtual_numbers:number_list')
+        
+        # Explicitly extract and format both currency amounts
+        price_usd = Decimal(str(service_data.get('Price', 0)))
+        price_ngn = Decimal(str(fivesim.calculate_price(price_usd)))
     except Exception as e:
         messages.error(request, f'Failed to get price: {str(e)}')
         return redirect('virtual_numbers:number_list')
@@ -82,29 +85,32 @@ def buy_number(request):
             messages.error(request, f'Insufficient balance. Your balance is ₦{wallet.balance} but price is ₦{price_ngn}')
             return redirect('virtual_numbers:number_list')
 
-        result = smsman.buy_number(country, service)
+        result = fivesim.buy_number(country, service)
 
         if 'error' in result or 'id' not in result:
-            messages.error(request, f'SMS-Man error: {result.get("error")}')
+            messages.error(request, f'5sim error: {result}')
             return redirect('virtual_numbers:number_list')
 
+        # Deduct wallet balance
         wallet.balance -= price_ngn
         wallet.save()
 
+        # Get or create country entry
         country_obj, _ = Country.objects.get_or_create(
             code=country,
-            defaults={'name': f"Country {country}"}
+            defaults={'name': country.title()}
         )
 
+        # Create the purchase log including cost_price_usd
         purchased = PurchasedNumber.objects.create(
             user=request.user,
             country=country_obj,
             service=service,
             phone_number=result['phone'],
-            provider='SMS-Man',
+            provider='5sim',
             provider_order_id=str(result['id']),
             price=price_ngn,
-            cost_price_usd=price_usd,
+            cost_price_usd=price_usd,  # Maps directly to your new database column
             status='pending'
         )
 
@@ -126,7 +132,7 @@ def number_detail(request, pk):
         action = request.POST.get('action')
 
         if action == 'check':
-            result = smsman.check_order(number.provider_order_id)
+            result = fivesim.check_order(number.provider_order_id)
             if 'error' in result:
                 messages.error(request, f'Error: {result["error"]}')
             else:
@@ -140,13 +146,13 @@ def number_detail(request, pk):
                     messages.info(request, 'No SMS yet. Please wait and try again.')
 
         elif action == 'finish':
-            smsman.change_status(number.provider_order_id, 'accept')
+            fivesim.finish_order(number.provider_order_id)
             number.status = 'completed'
             number.save()
             messages.success(request, 'Order completed.')
 
         elif action == 'cancel':
-            smsman.change_status(number.provider_order_id, 'reject')
+            fivesim.cancel_order(number.provider_order_id)
             number.status = 'cancelled'
             number.save()
             wallet = request.user.wallet
@@ -165,11 +171,11 @@ def my_numbers(request):
 
 @login_required
 def debug_api(request):
-    country = request.GET.get('country', '1')  # Update defaults to numeric IDs
-    service = request.GET.get('service', '1')
-    countries = smsman.get_countries()
-    raw_products = smsman.get_products(country, service)
-    balance = smsman.get_balance()
+    country = request.GET.get('country', 'austria')
+    service = request.GET.get('service', 'whatsapp')
+    countries = fivesim.get_countries()
+    raw_products = fivesim.get_products(country, service)
+    balance = fivesim.get_balance()
     return JsonResponse({
         'balance': balance,
         'countries_count': len(countries),
