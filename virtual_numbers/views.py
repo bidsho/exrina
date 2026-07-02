@@ -3,23 +3,23 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
 from .models import PurchasedNumber, Country
-from . import smsman  # Renamed from fivesim
+from . import smsman
 from decimal import Decimal
 
-# ALERT: Ensure these keys match SMS-Man's application IDs (numeric strings/ints)!
+# SMS-Man application numeric IDs mapped to frontend presentation assets
 SERVICES = [
     {'key': '1', 'label': 'WhatsApp', 'icon': 'fab fa-whatsapp', 'color': 'text-success'},
     {'key': '2', 'label': 'Telegram', 'icon': 'fab fa-telegram', 'color': 'text-primary'},
     {'key': '3', 'label': 'Gmail', 'icon': 'fas fa-envelope', 'color': 'text-danger'},
     {'key': '4', 'label': 'Facebook', 'icon': 'fab fa-facebook', 'color': 'text-primary'},
     {'key': '11', 'label': 'Twitter/X', 'icon': 'fab fa-twitter', 'color': 'text-info'},
-    {'key': '5', 'label': 'Instagram', 'icon': 'fab fa-instagram', 'color': 'text-danger'},
+    {'key': '5', 'label': 'Instagram', 'icon': 'fab fa-danger', 'color': 'text-danger'},
 ]
 
 @login_required
 def number_list(request):
-    selected_country = request.GET.get('country', '')  # Expects numeric ID string now
-    selected_service = request.GET.get('service', '1')  # Expects numeric ID string now
+    selected_country = request.GET.get('country', '')
+    selected_service = request.GET.get('service', '1')  # Default to SMS-Man WhatsApp ID
     products = []
     countries_data = {}
 
@@ -32,14 +32,14 @@ def number_list(request):
         try:
             service_data = smsman.get_products(selected_country, selected_service)
             if service_data:
-                # Fallback pricing protection if layout changes across packages
-                price_usd = service_data.get('price', service_data.get('cost', 0.2)) 
+                # Handle varying pricing tags in SMS-Man response payloads safely
+                price_usd = service_data.get('price', service_data.get('cost', 0.25))
                 products = [{
                     'country': selected_country,
                     'service': selected_service,
                     'price_usd': price_usd,
                     'price_ngn': smsman.calculate_price(price_usd),
-                    'count': service_data.get('count', service_data.get('Qty', 5)),
+                    'count': service_data.get('count', service_data.get('Qty', 10)),
                 }]
             else:
                 messages.info(request, 'No numbers available for this selection.')
@@ -69,7 +69,11 @@ def buy_number(request):
 
     try:
         service_data = smsman.get_products(country, service)
-        price_usd = Decimal(str(service_data.get('price', service_data.get('cost', 0.2))))
+        if not service_data:
+            messages.error(request, 'Service not available for this country.')
+            return redirect('virtual_numbers:number_list')
+            
+        price_usd = Decimal(str(service_data.get('price', service_data.get('cost', 0.25))))
         price_ngn = Decimal(str(smsman.calculate_price(price_usd)))
     except Exception as e:
         messages.error(request, f'Failed to get price: {str(e)}')
@@ -88,12 +92,17 @@ def buy_number(request):
             messages.error(request, f'SMS-Man error: {result.get("error")}')
             return redirect('virtual_numbers:number_list')
 
+        # Deduct wallet balance
         wallet.balance -= price_ngn
         wallet.save()
 
+        # Safely convert code to a descriptive title name or fallback
+        countries_list = smsman.get_countries()
+        country_name = countries_list.get(country, {}).get('text_en', f"Country {country}")
+
         country_obj, _ = Country.objects.get_or_create(
             code=country,
-            defaults={'name': f"Country {country}"}
+            defaults={'name': country_name}
         )
 
         purchased = PurchasedNumber.objects.create(
@@ -149,6 +158,7 @@ def number_detail(request, pk):
             smsman.change_status(number.provider_order_id, 'reject')
             number.status = 'cancelled'
             number.save()
+            
             wallet = request.user.wallet
             wallet.balance += number.price
             wallet.save()
@@ -165,7 +175,7 @@ def my_numbers(request):
 
 @login_required
 def debug_api(request):
-    country = request.GET.get('country', '1')  # Update defaults to numeric IDs
+    country = request.GET.get('country', '1')
     service = request.GET.get('service', '1')
     countries = smsman.get_countries()
     raw_products = smsman.get_products(country, service)

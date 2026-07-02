@@ -9,51 +9,59 @@ USD_TO_NGN = 1800
 
 
 def get_balance():
-    """Get current balance from SMS-Man."""
+    """Get current wallet balance from SMS-Man."""
     try:
         response = requests.get(f"{BASE_URL}/get-balance", params={"token": TOKEN})
-        return response.json()  # Returns structure like {"balance": "X.XX"} or {"error_code": ...}
+        return response.json()
     except Exception as e:
         return {'error': str(e)}
 
 
 def get_countries():
-    """Get all supported countries and normalize the structure for the templates."""
+    """
+    Get all supported countries from SMS-Man and structure them 
+    with the 'text_en' property expected by your Django template.
+    """
     try:
         response = requests.get(f"{BASE_URL}/get-all-countries", params={"token": TOKEN})
         data = response.json()
         
-        # If SMS-Man returns an error, fallback to an empty dict
-        if "error_code" in data:
+        if isinstance(data, dict) and "error_code" in data:
             return {}
 
         normalized_countries = {}
-        
-        # SMS-Man returns a dictionary where keys are numeric strings ('1', '2'...)
-        # and values are objects containing the real 'name'
-        for country_id, info in data.items():
-            if isinstance(info, dict) and 'name' in info:
-                # We save it with the clean uppercase name so it loops perfectly in your select elements
-                normalized_countries[country_id] = {
-                    'name': info['name'].title(),
-                    'id': country_id
-                }
-            else:
-                # Fallback if the endpoint layout returns raw simple key-value strings
-                normalized_countries[country_id] = {
-                    'name': str(info).title(),
-                    'id': country_id
-                }
+
+        # SHAPE 1: API returns a list of items -> [{"id": 1, "name": "Nigeria"}, ...]
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    c_id = str(item.get('id', ''))
+                    c_name = item.get('name', f"Country {c_id}")
+                    if c_id:
+                        normalized_countries[c_id] = {'text_en': c_name}
+            return normalized_countries
+
+        # IF DATA IS A DICTIONARY:
+        if isinstance(data, dict):
+            for key, value in data.items():
+                # SHAPE 2: Nested dictionary -> {"1": {"id": 1, "name": "Nigeria"}}
+                if isinstance(value, dict):
+                    c_name = value.get('name', f"Country {key}")
+                    normalized_countries[str(key)] = {'text_en': c_name}
                 
-        return normalized_countries
+                # SHAPE 3: Flat key-value pair -> {"1": "Nigeria"}
+                else:
+                    normalized_countries[str(key)] = {'text_en': str(value)}
+
+            return normalized_countries
+            
+        return {}
     except Exception:
         return {}
 
+
 def get_products(country_id, application_id):
-    """
-    Get information/limits for a selected country and service.
-    SMS-Man returns counts/prices via limits or price check endpoints.
-    """
+    """Get limits, availability, and cost metrics for a specific selection."""
     try:
         params = {
             "token": TOKEN,
@@ -63,26 +71,24 @@ def get_products(country_id, application_id):
         response = requests.get(f"{BASE_URL}/get-limits", params=params)
         data = response.json()
         
-        # Normalize to look like your old data layer if possible, or return raw
         if "error_code" in data:
             return {}
             
-        # SMS-Man typically gives cost in USD/RUB depending on account setup.
-        # Ensure your get_limits returns pricing keys. If not, fallback defaults are used.
+        # Extract the target app data from SMS-Man's nested schema
         return data.get(str(application_id), data)
     except Exception:
         return {}
 
 
 def calculate_price(usd_price):
-    """Convert USD to NGN and add profit markup safely."""
+    """Convert foreign currency pricing to NGN with calculated profit margins."""
     ngn_cost = float(usd_price) * USD_TO_NGN
     final_selling_price = ngn_cost * (1 + (PROFIT_PERCENT / 100))
     return round(final_selling_price, 2)
 
 
 def buy_number(country_id, application_id):
-    """Purchase a virtual number."""
+    """Order a brand new virtual phone line."""
     try:
         params = {
             "token": TOKEN,
@@ -95,9 +101,7 @@ def buy_number(country_id, application_id):
         if "error_code" in data or "error_msg" in data:
             return {'error': data.get('error_msg', data.get('error_code'))}
 
-        # Transform response keys to match view expectations
-        # SMS-Man outputs: {"request_id": 123, "number": "791234..."}
-        # We transform to mimic old signature: {"id": 123, "phone": "791234..."}
+        # Format directly into expected internal variables
         return {
             'id': data.get('request_id'),
             'phone': data.get('number')
@@ -107,7 +111,7 @@ def buy_number(country_id, application_id):
 
 
 def check_order(request_id):
-    """Check for incoming SMS messages on the assigned number."""
+    """Poll the API layer looking for arrived SMS text items."""
     try:
         params = {"token": TOKEN, "request_id": request_id}
         response = requests.get(f"{BASE_URL}/get-sms", params=params)
@@ -116,8 +120,6 @@ def check_order(request_id):
         if "error_code" in data:
             return {'error': data.get('error_msg', data.get('error_code'))}
 
-        # Transform SMS-Man keys to match your view structure
-        # SMS-Man outputs: {"sms_code": "1234", "sms_text": "Your code is 1234"}
         if "sms_code" in data:
             return {
                 'sms': [{'code': data['sms_code'], 'text': data.get('sms_text', '')}]
@@ -128,10 +130,7 @@ def check_order(request_id):
 
 
 def change_status(request_id, status):
-    """
-    Update order status on SMS-Man.
-    Statuses: 'accept' (finish/confirm used), 'reject' (cancel before SMS received)
-    """
+    """Modify the current order context state via 'accept' or 'reject' parameters."""
     try:
         params = {
             "token": TOKEN,
