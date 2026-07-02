@@ -174,7 +174,7 @@ def my_numbers(request):
     return render(request, 'virtual_numbers/my_numbers.html', {'numbers': numbers})
 
 
-@login_required
+@login_error
 def debug_api(request):
     country = request.GET.get('country', '7')
     service = request.GET.get('service', '6')
